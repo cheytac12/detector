@@ -1,0 +1,6 @@
+{
+  "threshold": 0.5,
+  "model_path": "model.h5",
+  "data_path": "MP_Data",
+  "use_gpu": false
+}
