@@ -1,6 +1,6 @@
 @echo off
 echo Setting Python version to 3.11...
-pyenv local 3.11 2>nul
+call pyenv local 3.11 2>nul
 
 if not exist ".venv\" (
     echo Creating virtual environment...
@@ -16,7 +16,7 @@ echo Upgrading pip...
 python -m pip install --upgrade pip
 
 echo Installing dependencies...
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 echo Launching application...
 python app.py
