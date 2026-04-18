@@ -396,6 +396,7 @@ class SentenceBuilder:
     def __init__(self, threshold=DEFAULT_THRESH, max_len=5):
         self.sentence    : list = []
         self.predictions : list = []
+        self.last_word           = None
         self.threshold           = threshold
         self.max_len             = max_len
 
@@ -410,9 +411,11 @@ class SentenceBuilder:
             if len(uniq) == 1 and uniq[0] == idx:
                 if res[idx] > self.threshold:
                     word = actions[idx]
-                    if not self.sentence or self.sentence[-1] != word:
-                        self.sentence.append(word)
-                        added = True
+                    if word != self.last_word:
+                        self.last_word = word
+                        if word not in ("neutral", "idle"):
+                            self.sentence.append(word)
+                            added = True
 
         if len(self.sentence) > self.max_len:
             self.sentence = self.sentence[-self.max_len:]
@@ -429,6 +432,7 @@ class SentenceBuilder:
     def clear(self):
         self.sentence    = []
         self.predictions = []
+        self.last_word   = None
 
 
 # -----------------------------------------------------------------
@@ -1095,7 +1099,7 @@ class App(tk.Tk):
 
         SectionLabel(form, "SIGNS (comma-separated)").pack(anchor="w")
         self._cv_signs = tk.StringVar(
-            value=", ".join(detect_classes()) or "hello, thanks, iloveyou")
+            value=", ".join(detect_classes()) or "hello, thanks, iloveyou, neutral")
         entry_field(form, self._cv_signs, wide=True).pack(
             fill="x", ipady=7, pady=(3, 14))
 
