@@ -739,7 +739,7 @@ class DetectThread(threading.Thread):
                     probs      = res.tolist()
                     idx        = int(np.argmax(res))
                     confidence = float(res[idx])
-                    pred_word  = self.signs[idx] if confidence >= self.threshold else None
+                    pred_word  = self.signs[idx] if confidence >= self.threshold else ""
 
                     builder.update(res, self.signs)
 
