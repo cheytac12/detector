@@ -55,6 +55,7 @@ if [ "$PY_MINOR" -ge 12 ]; then
         "tensorflow>=2.16.0" \
         "mediapipe==0.10.21" \
         "opencv-python==4.9.0.80" \
+        "opencv-contrib-python==4.9.0.80" \
         "numpy==1.26.4" \
         "Pillow==10.4.0" \
         "scikit-learn==1.4.2" \

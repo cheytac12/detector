@@ -133,12 +133,12 @@ echo   Installing dependencies (first run may take several minutes)...
 
 if !MINOR! GEQ 12 (
     echo   Python 3.12 detected - using tensorflow 2.16+ and keras 3
-    "!PIP!" install --quiet "tensorflow>=2.16.0" "mediapipe==0.10.21" "opencv-python==4.9.0.80" "numpy==1.26.4" "Pillow==10.4.0" "scikit-learn==1.4.2" "scipy==1.13.1" "protobuf>=4.25.3,<5.0.0"
+    "!PIP!" install --quiet "tensorflow>=2.16.0" "mediapipe==0.10.21" "opencv-python==4.9.0.80" "opencv-contrib-python==4.9.0.80" "numpy==1.26.4" "Pillow==10.4.0" "scikit-learn==1.4.2" "scipy==1.13.1" "protobuf>=4.25.3,<5.0.0"
 ) else (
     "!PIP!" install --quiet -r requirements.txt
     if errorlevel 1 (
         echo   Bulk install failed - falling back to individual installs...
-        for %%p in ("tensorflow==2.15.1" "mediapipe==0.10.21" "opencv-python==4.9.0.80" "numpy==1.26.4" "Pillow==10.4.0" "scikit-learn==1.4.2" "scipy==1.13.1" "protobuf>=4.25.3,<5.0.0") do (
+        for %%p in ("tensorflow==2.15.1" "mediapipe==0.10.21" "opencv-python==4.9.0.80" "opencv-contrib-python==4.9.0.80" "numpy==1.26.4" "Pillow==10.4.0" "scikit-learn==1.4.2" "scipy==1.13.1" "protobuf>=4.25.3,<5.0.0") do (
             "!PIP!" install --quiet %%p
         )
     )

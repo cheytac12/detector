@@ -905,6 +905,8 @@ class App(tk.Tk):
         self._collect_th : CollectThread       = None
         self._train_th   : TrainThread         = None
         self._detect_th  : DetectThread        = None
+        self._model_loading                 = False
+        self._pending_detect_start          = False
 
         self._preview_q  = queue.Queue(maxsize=2)
         self._collect_fq = queue.Queue(maxsize=2)
@@ -1401,6 +1403,10 @@ class App(tk.Tk):
 
     def _start_detect(self):
         if self.model is None:
+            self._pending_detect_start = True
+            if self._auto_load_model():
+                return
+            self._pending_detect_start = False
             messagebox.showwarning("No model", "Load or train a model first.")
             return
         self._stop_detect()
@@ -1717,11 +1723,37 @@ class App(tk.Tk):
     # MODEL LOADING
     # ==========================================================
     def _auto_load_model(self):
-        path = self.settings.get("model_path", MODEL_PATH)
-        if Path(path).exists():
-            self._load_model(path)
+        if self.model is not None or self._model_loading:
+            return False
+
+        candidates = []
+        configured = self.settings.get("model_path", MODEL_PATH)
+        if configured:
+            candidates.append(configured)
+        if MODEL_PATH not in candidates:
+            candidates.append(MODEL_PATH)
+        for p in Path(".").glob("*.h5"):
+            if p.name.endswith("_weights.h5"):
+                continue
+            sp = str(p)
+            if sp not in candidates:
+                candidates.append(sp)
+
+        for path in candidates:
+            if Path(path).exists():
+                self._load_model(path)
+                return True
+
+        classes = detect_classes(self.settings.get("data_path", DATA_PATH))
+        if classes:
+            self.signs = classes
+            self._lbl_classes.config(text="  ".join(classes))
+        return False
 
     def _load_model(self, path):
+        if self._model_loading:
+            return
+        self._model_loading = True
         self._lbl_mstatus.config(text="Loading...", fg=C["muted"])
 
         def _do():
@@ -1737,17 +1769,25 @@ class App(tk.Tk):
                     n = m.output_shape[-1]
                     classes = [f"sign_{i}" for i in range(n)]
                 self.after(0, lambda: self._on_loaded(m, classes, path))
-            except Exception as e:
-                self.after(0, lambda: self._lbl_mstatus.config(
-                    text="FAIL Load failed", fg=C["danger"]))
+            except Exception:
+                self.after(0, self._on_load_failed)
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_loaded(self, model, classes, path):
+        self._model_loading = False
         self.model = model
         self.signs = classes
         self._lbl_mstatus.config(text=f"OK {Path(path).name}", fg=C["success"])
         self._lbl_classes.config(text="  ".join(classes))
+        if self._pending_detect_start:
+            self._pending_detect_start = False
+            self.after(0, self._start_detect)
+
+    def _on_load_failed(self):
+        self._model_loading = False
+        self._pending_detect_start = False
+        self._lbl_mstatus.config(text="FAIL Load failed", fg=C["danger"])
 
     # ==========================================================
     # MAIN TICK - drains all queues every 40 ms
