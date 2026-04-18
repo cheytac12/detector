@@ -10,7 +10,7 @@ Preserves ALL original notebook + v2/main.py functionality:
   * Video file detection
   * GPU toggle
   * Auto class detection from MP_Data/
-  * Camera source selector (index or IP/URL - supports DroidCam)
+  * Camera source selector (camera index or URL)
 """
 
 import sys
@@ -41,7 +41,7 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 # -- tkinter: give a clear error if missing ----------------------------------
 try:
     import tkinter as tk
-    from tkinter import ttk, messagebox, filedialog, scrolledtext
+    from tkinter import ttk, messagebox, filedialog
 except ModuleNotFoundError:
     print(
         "\n[ERROR] tkinter is not installed.\n"
@@ -94,6 +94,12 @@ DEFAULT_EPOCHS  = 2000
 LOG_DIR         = "Logs"
 SENTENCE_LINES  = 2
 PROB_BAR_HEIGHT = 6
+CM_HEATMAP_BASE_TONE = 28
+CM_HEATMAP_TONE_RANGE = 185
+CM_HEATMAP_GREEN_SCALE = 0.86
+CM_HEATMAP_BLUE_HEX = "3a"
+CM_LABEL_MAX_LEN = 9
+CM_LABEL_TRUNC_LEN = 8
 
 # -----------------------------------------------------------------
 # COLOUR PALETTE
@@ -138,7 +144,6 @@ def parse_camera_source(src: str):
     Convert a user-supplied camera string to the right type for cv2.VideoCapture.
     Accepts:
       - integer index:  "0", "1", "2" ...
-      - DroidCam URL:   "http://192.168.x.x:4747/video"
       - Any RTSP/HTTP URL string
     """
     src = src.strip()
@@ -848,24 +853,25 @@ def show_frame_on_canvas(canvas, frame, _photo_ref):
 class CameraSelector(tk.Frame):
     """
     A compact row with a combobox + custom entry for camera source.
-    Supports numeric indices (0, 1, 2...) and URL strings
-    (DroidCam: http://192.168.x.x:4747/video, RTSP, etc.)
+    Supports numeric indices (0, 1, 2...) and URL strings.
     """
     def __init__(self, parent, label="Camera source", initial="0", **kw):
         super().__init__(parent, bg=C["bg"], **kw)
-        tk.Label(self, text=label, font=F(9),
-                 bg=C["bg"], fg=C["muted"]).pack(side="left")
+        if label:
+            tk.Label(self, text=label, font=F(9),
+                     bg=C["bg"], fg=C["muted"]).pack(side="left")
 
         self._var = tk.StringVar(value=initial)
 
         # dropdown for detected indices
         self._combo = ttk.Combobox(
             self, textvariable=self._var,
-            font=F(9), width=28, state="normal")
+            font=F(9), width=28, state="normal",
+            style="Dark.TCombobox")
         self._combo.pack(side="left", padx=(6, 4))
         self._combo.bind("<FocusIn>", lambda e: None)   # allow free typing
 
-        Btn(self, "Scan Scan", self._scan, small=True).pack(side="left", padx=(0, 4))
+        Btn(self, "Scan", self._scan, small=True).pack(side="left", padx=(0, 4))
 
         self._status = tk.Label(self, text="", font=F(8),
                                 bg=C["bg"], fg=C["muted"])
@@ -875,8 +881,7 @@ class CameraSelector(tk.Frame):
 
     def _populate_defaults(self):
         detected = probe_cameras()
-        opts = detected + ["http://192.168.x.x:4747/video (DroidCam)"]
-        self._combo["values"] = opts
+        self._combo["values"] = detected
         current = self._var.get().strip()
         if detected:
             if not current:
@@ -891,8 +896,7 @@ class CameraSelector(tk.Frame):
 
         def _do():
             found = probe_cameras(8)
-            opts  = found + ["http://192.168.x.x:4747/video (DroidCam)"]
-            self._combo["values"] = opts
+            self._combo["values"] = found
             msg = f"({len(found)} cam(s) found)" if found else "(none found)"
             self._status.config(text=msg, fg=C["muted"])
 
@@ -901,9 +905,6 @@ class CameraSelector(tk.Frame):
     def get_source(self):
         """Return parsed source (int or str) ready for cv2.VideoCapture."""
         raw = self._var.get().strip()
-        # strip the helper text appended to DroidCam option
-        if " (" in raw:
-            raw = raw.split(" (")[0]
         return parse_camera_source(raw)
 
 
@@ -921,6 +922,7 @@ class App(tk.Tk):
         self.settings   = load_settings()
         self.model      = None
         self.signs      = []
+        self._train_classes = []
         self._photos    = {}
 
         self._preview_th : CameraPreviewThread = None
@@ -986,10 +988,6 @@ class App(tk.Tk):
         self._lbl_mstatus = tk.Label(self._sb_bottom, text="No model",
                                      font=F(8), bg=C["surface"], fg=C["muted"], anchor="w")
         self._lbl_mstatus.pack(fill="x")
-        self._lbl_classes = tk.Label(self._sb_bottom, text="",
-                                     font=F(8), bg=C["surface"], fg=C["muted"], anchor="w",
-                                     wraplength=190, justify="left")
-        self._lbl_classes.pack(fill="x", pady=(2, 0))
 
         # -- main area -----------------------------------------
         self._main = tk.Frame(self, bg=C["bg"])
@@ -1014,12 +1012,24 @@ class App(tk.Tk):
                     background=C["accent"], thickness=5, relief="flat")
         s.configure("TNotebook", background=C["bg"], borderwidth=0)
         # style the combobox
-        s.configure("TCombobox",
+        s.configure("Dark.TCombobox",
                     fieldbackground=C["surface2"],
                     background=C["surface2"],
                     foreground=C["text"],
+                    bordercolor=C["border"],
+                    lightcolor=C["border"],
+                    darkcolor=C["border"],
+                    arrowcolor=C["text"],
                     selectbackground=C["accent_dk"],
                     selectforeground=C["text"])
+        s.map("Dark.TCombobox",
+              fieldbackground=[("readonly", C["surface2"])],
+              background=[("readonly", C["surface2"])],
+              foreground=[("readonly", C["text"])])
+        self.option_add("*TCombobox*Listbox*Background", C["surface2"])
+        self.option_add("*TCombobox*Listbox*Foreground", C["text"])
+        self.option_add("*TCombobox*Listbox*selectBackground", C["accent_dk"])
+        self.option_add("*TCombobox*Listbox*selectForeground", C["text"])
 
     def _show(self, key):
         for k, f in self._pages.items():
@@ -1108,11 +1118,11 @@ class App(tk.Tk):
         form.pack_propagate(False)
 
         # Camera selector
-        SectionLabel(form, "CAMERA SOURCE").pack(anchor="w")
         self._collect_cam = CameraSelector(
             form,
+            label="",
             initial=str(self.settings.get("camera_source", "0")))
-        self._collect_cam.pack(anchor="w", pady=(3, 12))
+        self._collect_cam.pack(anchor="w", pady=(0, 12))
 
         SectionLabel(form, "SIGNS (comma-separated)").pack(anchor="w")
         self._cv_signs = tk.StringVar(
@@ -1228,13 +1238,17 @@ class App(tk.Tk):
                  font=F(8), bg=C["surface2"], fg=C["text"],
                  justify="left", anchor="w").pack(fill="x")
 
-        SectionLabel(left, "CLASSES TO TRAIN (auto-detected from MP_Data/)").pack(anchor="w")
+        SectionLabel(left, "CLASSES TO TRAIN").pack(anchor="w")
         self._tr_classes_lbl = tk.Label(left, text="-", font=F(10),
                                         bg=C["bg"], fg=C["text"], wraplength=300, justify="left")
         self._tr_classes_lbl.pack(anchor="w", pady=(3, 4))
 
-        Btn(left, "↻ Refresh Class List", self._refresh_train_classes,
-            small=True).pack(anchor="w", pady=(0, 14))
+        classes_btn_row = tk.Frame(left, bg=C["bg"])
+        classes_btn_row.pack(anchor="w", pady=(0, 14))
+        Btn(classes_btn_row, "↻ Refresh", self._refresh_train_classes,
+            small=True).pack(side="left", padx=(0, 6))
+        Btn(classes_btn_row, "View List", self._show_train_classes_popup,
+            small=True).pack(side="left")
 
         row = tk.Frame(left, bg=C["bg"])
         row.pack(fill="x", pady=3)
@@ -1270,29 +1284,49 @@ class App(tk.Tk):
         self._tr_prog = ttk.Progressbar(left, mode="determinate")
         self._tr_prog.pack(fill="x", pady=(0, 10))
 
-        SectionLabel(left, "LOG").pack(anchor="w", pady=(4, 3))
-        self._tr_log = scrolledtext.ScrolledText(
-            left, bg=C["surface2"], fg=C["text"], font=FM(8),
+        log_head = tk.Frame(left, bg=C["bg"])
+        log_head.pack(fill="x", pady=(4, 3))
+        SectionLabel(log_head, "LOG").pack(side="left")
+        Btn(log_head, "Copy", self._copy_train_log, small=True).pack(side="right")
+        Btn(log_head, "Export", self._export_train_log, small=True).pack(side="right", padx=(0, 6))
+        self._tr_log_wrap = tk.Frame(left, bg=C["surface2"], bd=1, relief="flat")
+        self._tr_log_wrap.pack(fill="both", expand=True)
+        self._tr_log = tk.Text(
+            self._tr_log_wrap, bg=C["surface2"], fg=C["text"], font=FM(8),
             bd=0, relief="flat", height=16, wrap="word",
-            state="disabled")
-        self._tr_log.pack(fill="both", expand=True)
+            insertbackground=C["text"], selectbackground=C["accent_dk"],
+            state="disabled",
+            yscrollcommand=lambda *a: self._tr_log_sb.set(*a))
+        self._tr_log_sb = tk.Scrollbar(
+            self._tr_log_wrap, orient="vertical", command=self._tr_log.yview,
+            bg=C["surface"], activebackground=C["surface2"],
+            troughcolor=C["bg"], highlightthickness=0, bd=0,
+            elementborderwidth=0)
+        self._tr_log.pack(side="left", fill="both", expand=True)
+        self._tr_log_sb.pack(side="right", fill="y")
 
         right = tk.Frame(body, bg=C["surface2"], bd=1)
         right.pack(side="right", fill="both", expand=True)
-        tk.Label(right, text="Model summary will appear here after training starts",
-                 font=F(9), bg=C["surface2"], fg=C["muted"],
-                 wraplength=300).pack(expand=True)
+        SectionLabel(right, "TRAINING SUMMARY").pack(anchor="w", padx=12, pady=(10, 6))
+        self._tr_summary = tk.Label(
+            right, text="", font=F(9),
+            bg=C["surface2"], fg=C["text"], justify="left", anchor="nw",
+            wraplength=380)
+        self._tr_summary.pack(fill="x", padx=12)
+        self._update_train_summary([])
 
     def _refresh_train_classes(self):
         classes = detect_classes()
+        self._train_classes = classes
         if classes:
             self._tr_classes_lbl.config(
-                text=", ".join(classes) + f"  ({len(classes)} total)",
+                text=f"{len(classes)} classes found",
                 fg=C["text"])
         else:
             self._tr_classes_lbl.config(
                 text="No data found in MP_Data/ — collect data first",
                 fg=C["danger"])
+        self._update_train_summary(classes)
 
     def _start_train(self):
         # Always re-scan MP_Data so newly collected gestures are included
@@ -1304,10 +1338,12 @@ class App(tk.Tk):
                 "Go to Collect Data tab first and record sequences\n"
                 "for each gesture you want to train.")
             return
-        # Update the displayed class list so user can see exactly what's included
+        # Update class summary so user can see exactly what's included
         self._tr_classes_lbl.config(
-            text=", ".join(classes) + f"  ({len(classes)} total)",
+            text=f"{len(classes)} classes found",
             fg=C["text"])
+        self._train_classes = classes
+        self._update_train_summary(classes)
         epochs = int(self._tr_epochs.get() or DEFAULT_EPOCHS)
         seqlen = int(self._tr_seqlen.get() or SEQ_LEN)
         self._tr_log_clear()
@@ -1336,6 +1372,65 @@ class App(tk.Tk):
         self._tr_log.insert("end", str(text) + "\n")
         self._tr_log.see("end")
         self._tr_log.config(state="disabled")
+
+    def _copy_train_log(self):
+        txt = self._tr_log.get("1.0", "end-1c")
+        self.clipboard_clear()
+        self.clipboard_append(txt)
+
+    def _export_train_log(self):
+        path = filedialog.asksaveasfilename(
+            title="Export training log",
+            defaultextension=".txt",
+            filetypes=[("Text", "*.txt"), ("All", "*")])
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self._tr_log.get("1.0", "end-1c"))
+
+    def _show_train_classes_popup(self):
+        if not self._train_classes:
+            messagebox.showinfo("Classes", "No classes found.")
+            return
+        win = tk.Toplevel(self)
+        win.title("Classes to Train")
+        win.configure(bg=C["bg"])
+        win.geometry("420x460")
+        box = tk.Frame(win, bg=C["surface2"], padx=10, pady=10)
+        box.pack(fill="both", expand=True, padx=12, pady=12)
+        tk.Label(box, text=f"{len(self._train_classes)} classes",
+                 font=F(10, True), bg=C["surface2"], fg=C["text"]).pack(anchor="w", pady=(0, 8))
+        list_wrap = tk.Frame(box, bg=C["surface2"])
+        list_wrap.pack(fill="both", expand=True)
+        lb = tk.Listbox(
+            list_wrap, bg=C["surface2"], fg=C["text"], font=FM(9),
+            selectbackground=C["accent_dk"], selectforeground=C["text"],
+            relief="flat", bd=0, highlightthickness=0)
+        sb = tk.Scrollbar(
+            list_wrap, orient="vertical", command=lb.yview,
+            bg=C["surface"], activebackground=C["surface2"],
+            troughcolor=C["bg"], highlightthickness=0, bd=0,
+            elementborderwidth=0)
+        lb.configure(yscrollcommand=sb.set)
+        lb.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for cls_name in self._train_classes:
+            lb.insert("end", cls_name)
+
+    def _update_train_summary(self, classes):
+        classes = classes or []
+        model_path = self.settings.get("model_path", MODEL_PATH)
+        data_path = self.settings.get("data_path", DATA_PATH)
+        summary = [
+            f"Model file: {Path(model_path).name}",
+            f"Data source: {data_path}",
+            f"Classes detected: {len(classes)}",
+            f"Epochs: {self._tr_epochs.get() or DEFAULT_EPOCHS}",
+            f"Sequence length: {self._tr_seqlen.get() or SEQ_LEN}",
+            "",
+            "Training rebuilds model.h5 from all data in MP_Data/."
+        ]
+        self._tr_summary.config(text="\n".join(summary))
 
     # ==========================================================
     # PAGE 4 - LIVE DETECT
@@ -1564,19 +1659,37 @@ class App(tk.Tk):
         self._ev_acc_lbl = tk.Label(left, text="", font=F(20, True),
                                     bg=C["bg"], fg=C["success"])
         self._ev_acc_lbl.pack(anchor="w", pady=(16, 0))
+        self._ev_meta_lbl = tk.Label(left, text="", font=F(9),
+                                     bg=C["bg"], fg=C["muted"], justify="left", anchor="w")
+        self._ev_meta_lbl.pack(anchor="w", pady=(4, 0))
 
         right = tk.Frame(body, bg=C["surface2"])
         right.pack(side="right", fill="both", expand=True)
-        SectionLabel(right, "RESULTS").pack(anchor="w", padx=12, pady=(10, 4))
-        self._ev_log = scrolledtext.ScrolledText(
-            right, bg=C["surface2"], fg=C["text"], font=FM(9),
-            bd=0, relief="flat", wrap="word", state="disabled")
-        self._ev_log.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        SectionLabel(right, "CONFUSION MATRIX").pack(anchor="w", padx=12, pady=(10, 4))
+        self._ev_cm_canvas = tk.Canvas(right, bg=C["surface2"], highlightthickness=0, height=360)
+        self._ev_cm_canvas.pack(fill="x", padx=10, pady=(0, 8))
+        SectionLabel(right, "DETAILS").pack(anchor="w", padx=12, pady=(0, 4))
+        self._ev_log_wrap = tk.Frame(right, bg=C["surface2"], bd=1, relief="flat")
+        self._ev_log_wrap.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._ev_log = tk.Text(
+            self._ev_log_wrap, bg=C["surface2"], fg=C["text"], font=FM(9),
+            bd=0, relief="flat", wrap="word",
+            insertbackground=C["text"], selectbackground=C["accent_dk"],
+            state="disabled",
+            yscrollcommand=lambda *a: self._ev_log_sb.set(*a))
+        self._ev_log_sb = tk.Scrollbar(
+            self._ev_log_wrap, orient="vertical", command=self._ev_log.yview,
+            bg=C["surface"], activebackground=C["surface2"],
+            troughcolor=C["bg"], highlightthickness=0, bd=0,
+            elementborderwidth=0)
+        self._ev_log.pack(side="left", fill="both", expand=True)
+        self._ev_log_sb.pack(side="right", fill="y")
 
     def _refresh_eval_classes(self):
         classes = detect_classes()
         self._ev_classes_lbl.config(
-            text=", ".join(classes) if classes else "No data")
+            text=f"{len(classes)} classes found" if classes
+            else "No data found in MP_Data/ — collect data first")
 
     def _run_eval(self):
         if self.model is None:
@@ -1593,7 +1706,7 @@ class App(tk.Tk):
                 import tensorflow as tf
                 from tensorflow.keras.utils import to_categorical
                 from sklearn.model_selection import train_test_split
-                from sklearn.metrics import multilabel_confusion_matrix, accuracy_score
+                from sklearn.metrics import confusion_matrix, accuracy_score
 
                 label_map  = {s: i for i, s in enumerate(classes)}
                 sequences, labels = [], []
@@ -1622,7 +1735,7 @@ class App(tk.Tk):
                 ytrue    = np.argmax(y_test, axis=1).tolist()
                 yhat     = np.argmax(yhat_raw, axis=1).tolist()
                 acc      = accuracy_score(ytrue, yhat)
-                cm       = multilabel_confusion_matrix(ytrue, yhat)
+                cm       = confusion_matrix(ytrue, yhat, labels=list(range(len(classes))))
 
                 self.after(0, lambda: self._ev_show(acc, cm, classes, ytrue, yhat))
             except Exception as e:
@@ -1633,11 +1746,18 @@ class App(tk.Tk):
 
     def _ev_show(self, acc, cm, classes, ytrue, yhat):
         self._ev_acc_lbl.config(text=f"{acc:.1%}")
-        lines = [f"Test accuracy: {acc:.4f} ({acc:.1%})\n",
-                 f"Samples tested: {len(ytrue)}\n",
-                 "\nConfusion matrices (one per class):"]
+        self._ev_meta_lbl.config(text=f"Samples tested: {len(ytrue)}\nClasses: {len(classes)}")
+        self._draw_eval_confusion_matrix(cm, classes)
+        totals = cm.sum(axis=1)
+        correct = np.diag(cm)
+        lines = [f"Test accuracy: {acc:.4f} ({acc:.1%})",
+                 f"Samples tested: {len(ytrue)}",
+                 f"Classes: {len(classes)}",
+                 "",
+                 "Per-class recall:"]
         for i, c in enumerate(classes):
-            lines.append(f"\n  {c}:\n{cm[i]}")
+            recall = (correct[i] / totals[i]) if totals[i] else 0.0
+            lines.append(f"  {c}: {recall:.1%} ({int(correct[i])}/{int(totals[i])})")
         self._ev_log_set("\n".join(lines))
 
     def _ev_log_set(self, text):
@@ -1645,6 +1765,47 @@ class App(tk.Tk):
         self._ev_log.delete("1.0", "end")
         self._ev_log.insert("end", text)
         self._ev_log.config(state="disabled")
+
+    def _draw_eval_confusion_matrix(self, cm, classes):
+        c = self._ev_cm_canvas
+        c.delete("all")
+        n = len(classes)
+        if n == 0:
+            return
+        c.update_idletasks()
+        w = max(c.winfo_width(), 200)
+        h = max(c.winfo_height(), 200)
+        margin = 52
+        size = min(w - margin - 10, h - margin - 10)
+        if size <= 20:
+            return
+        cell = max(1, size / n)
+        vmax = int(np.max(cm)) if cm.size else 0
+        for i in range(n):
+            for j in range(n):
+                val = int(cm[i, j])
+                # Keep the heatmap in a muted gold palette that matches the dark UI theme.
+                tone = int(CM_HEATMAP_BASE_TONE + (CM_HEATMAP_TONE_RANGE * (val / vmax))) if vmax else CM_HEATMAP_BASE_TONE
+                color = f"#{tone:02x}{int(tone * CM_HEATMAP_GREEN_SCALE):02x}{CM_HEATMAP_BLUE_HEX}"
+                x1 = margin + j * cell
+                y1 = margin + i * cell
+                x2 = x1 + cell
+                y2 = y1 + cell
+                c.create_rectangle(x1, y1, x2, y2, fill=color, outline=C["border"])
+                if n <= 12:
+                    c.create_text((x1 + x2) / 2, (y1 + y2) / 2,
+                                  text=str(val), fill=C["text"], font=F(8))
+        c.create_text(margin + size / 2, 20, text="Predicted",
+                      fill=C["muted"], font=F(8))
+        c.create_text(16, margin + size / 2, text="True",
+                      fill=C["muted"], font=F(8), angle=90)
+        if n <= 10:
+            for i, name in enumerate(classes):
+                label = name if len(name) <= CM_LABEL_MAX_LEN else f"{name[:CM_LABEL_TRUNC_LEN]}…"
+                x = margin + (i + 0.5) * cell
+                y = margin + (i + 0.5) * cell
+                c.create_text(x, margin - 8, text=label, fill=C["muted"], font=F(7))
+                c.create_text(margin - 6, y, text=label, fill=C["muted"], font=F(7), anchor="e")
 
     # ==========================================================
     # PAGE 7 - SETTINGS
@@ -1677,9 +1838,7 @@ class App(tk.Tk):
             left,
             text=(
                 "Enter a camera index (0, 1, 2...) or a full URL.\n"
-                "DroidCam (USB): usually index 1 or 2.\n"
-                "DroidCam (WiFi): http://<phone-ip>:4747/video\n"
-                "  e.g. http://192.168.1.5:4747/video"
+                "Examples: 0, 1, rtsp://..., http://..."
             ),
             font=F(8), bg=C["bg"], fg=C["muted"], justify="left", anchor="w")
         cam_help.pack(anchor="w", pady=(0, 6))
@@ -1777,7 +1936,6 @@ class App(tk.Tk):
         classes = detect_classes(self.settings.get("data_path", DATA_PATH))
         if classes:
             self.signs = classes
-            self._lbl_classes.config(text="  ".join(classes))
         return False
 
     def _load_model(self, path):
@@ -1808,8 +1966,7 @@ class App(tk.Tk):
         self._model_loading = False
         self.model = model
         self.signs = classes
-        self._lbl_mstatus.config(text=f"OK {Path(path).name}", fg=C["success"])
-        self._lbl_classes.config(text="  ".join(classes))
+        self._lbl_mstatus.config(text=f"{Path(path).name}", fg=C["success"])
         if self._pending_detect_start:
             self._pending_detect_start = False
             self.after(0, self._start_detect)
