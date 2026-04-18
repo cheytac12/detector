@@ -31,6 +31,7 @@ import time
 import queue
 import json
 import platform
+from collections import deque
 from pathlib import Path
 
 # suppress TF noise before import
@@ -91,6 +92,8 @@ DEFAULT_THRESH  = 0.5
 ERROR_MSG_MAX_LEN = 120
 DEFAULT_EPOCHS  = 2000
 LOG_DIR         = "Logs"
+SENTENCE_LINES  = 2
+PROB_BAR_HEIGHT = 6
 
 # -----------------------------------------------------------------
 # COLOUR PALETTE
@@ -393,32 +396,39 @@ def build_lstm_model(num_classes, seq_len=SEQ_LEN, feat=FEAT_VEC):
 # SENTENCE BUILDER  (from original notebook logic)
 # -----------------------------------------------------------------
 class SentenceBuilder:
-    def __init__(self, threshold=DEFAULT_THRESH, max_len=5):
+    def __init__(self, threshold=DEFAULT_THRESH, max_len=5, min_streak=6):
         self.sentence    : list = []
         self.predictions : list = []
         self.last_word           = None
         self.threshold           = threshold
         self.max_len             = max_len
+        self.min_streak          = max(1, int(min_streak))
+        self._streak_idx         = None
+        self._streak_count       = 0
 
     def update(self, res, actions):
         idx = int(np.argmax(res))
         self.predictions.append(idx)
 
+        if self._streak_idx == idx:
+            self._streak_count += 1
+        else:
+            self._streak_idx = idx
+            self._streak_count = 1
+
         added = False
-        if len(self.predictions) >= 10:
-            recent = self.predictions[-10:]
-            uniq = np.unique(recent)
-            if len(uniq) == 1 and uniq[0] == idx:
-                if res[idx] > self.threshold:
-                    word = actions[idx]
-                    if word != self.last_word:
-                        self.last_word = word
-                        if word not in ("neutral", "idle"):
-                            self.sentence.append(word)
-                            added = True
+        if self._streak_count >= self.min_streak and res[idx] >= self.threshold:
+            word = actions[idx]
+            if word != self.last_word:
+                self.last_word = word
+                if word not in ("neutral", "idle"):
+                    self.sentence.append(word)
+                    added = True
 
         if len(self.sentence) > self.max_len:
             self.sentence = self.sentence[-self.max_len:]
+        if len(self.predictions) > 200:
+            self.predictions = self.predictions[-200:]
 
         return added
 
@@ -428,11 +438,14 @@ class SentenceBuilder:
     def undo(self):
         if self.sentence:
             self.sentence.pop()
+            self.last_word = None
 
     def clear(self):
         self.sentence    = []
         self.predictions = []
         self.last_word   = None
+        self._streak_idx = None
+        self._streak_count = 0
 
 
 # -----------------------------------------------------------------
@@ -693,6 +706,7 @@ class DetectThread(threading.Thread):
         self.running       = True
         self.colors        = [(245, 117, 16), (117, 245, 16), (16, 117, 245)]
         self._seq_buf      = []
+        self._prob_hist    = deque(maxlen=5)
 
     def run(self):
         builder = SentenceBuilder(self.threshold)
@@ -720,12 +734,14 @@ class DetectThread(threading.Thread):
                 probs      = []
 
                 if len(self._seq_buf) == SEQ_LEN:
-                    res = self.model.predict(
+                    raw_res = self.model.predict(
                         np.expand_dims(self._seq_buf, axis=0), verbose=0)[0]
+                    self._prob_hist.append(raw_res)
+                    res = np.mean(np.asarray(self._prob_hist), axis=0)
                     probs      = res.tolist()
                     idx        = int(np.argmax(res))
                     confidence = float(res[idx])
-                    pred_word  = self.signs[idx]
+                    pred_word  = self.signs[idx] if confidence >= self.threshold else ""
 
                     builder.update(res, self.signs)
 
@@ -757,6 +773,7 @@ class DetectThread(threading.Thread):
     def stop(self):
         self.running = False
         self._seq_buf = []
+        self._prob_hist.clear()
 
 
 # -----------------------------------------------------------------
@@ -1361,6 +1378,8 @@ class App(tk.Tk):
         SectionLabel(rp, "PROBABILITIES").pack(anchor="w")
         self._dt_prob_frame = tk.Frame(rp, bg=C["bg"])
         self._dt_prob_frame.pack(fill="x", pady=(4, 14))
+        self._dt_prob_signs = ()
+        self._dt_prob_widgets = {}
 
         tk.Frame(rp, bg=C["border"], height=1).pack(fill="x", pady=6)
 
@@ -1369,7 +1388,8 @@ class App(tk.Tk):
         sb.pack(fill="x", pady=(4, 8))
         self._dt_sent = tk.Label(sb, text="",
                                  font=F(12), bg=C["surface2"], fg=C["text"],
-                                 wraplength=240, justify="left", anchor="w")
+                                 wraplength=240, justify="left", anchor="w",
+                                 height=SENTENCE_LINES)
         self._dt_sent.pack(fill="x")
 
         sc = tk.Frame(rp, bg=C["bg"])
@@ -1421,6 +1441,7 @@ class App(tk.Tk):
         self._detect_th = DetectThread(
             self.model, self.signs, src, self._detect_q, thr, viz)
         self._detect_th.start()
+        self._draw_prob_bars(self._dt_prob_frame, [0.0] * len(self.signs), self.signs)
 
     def _stop_detect(self):
         if self._detect_th:
@@ -1920,24 +1941,34 @@ class App(tk.Tk):
     # HELPERS
     # ==========================================================
     def _draw_prob_bars(self, container, probs, signs):
-        for w in container.winfo_children():
-            w.destroy()
-        if not probs:
-            return
-        max_p = max(probs) if probs else 1
-        for i, p in enumerate(probs):
-            s    = signs[i] if i < len(signs) else f"cls{i}"
-            row  = tk.Frame(container, bg=C["bg"])
-            row.pack(fill="x", pady=1)
-            tk.Label(row, text=s, font=F(8), bg=C["bg"],
-                     fg=C["text"], width=14, anchor="w").pack(side="left")
-            bg = tk.Frame(row, bg=C["border"], height=5)
-            bg.pack(side="left", fill="x", expand=True, padx=(4, 0))
-            bg.update_idletasks()
-            tw   = bg.winfo_width() or 160
-            fw   = max(2, int(p * tw))
-            col  = C["accent"] if p == max_p else C["accent_dk"]
-            tk.Frame(bg, bg=col, height=5, width=fw).place(x=0, y=0)
+        normalized_signs = tuple(signs)
+        if normalized_signs != self._dt_prob_signs:
+            for w in container.winfo_children():
+                w.destroy()
+            self._dt_prob_widgets = {}
+            self._dt_prob_signs = normalized_signs
+            for s in normalized_signs:
+                row = tk.Frame(container, bg=C["bg"])
+                row.pack(fill="x", pady=1)
+                tk.Label(row, text=s, font=F(8), bg=C["bg"],
+                         fg=C["text"], width=14, anchor="w").pack(side="left")
+                bg = tk.Frame(row, bg=C["border"], height=PROB_BAR_HEIGHT)
+                bg.pack(side="left", fill="x", expand=True, padx=(4, 0))
+                bg.pack_propagate(False)
+                fill = tk.Frame(bg, bg=C["accent_dk"], height=PROB_BAR_HEIGHT)
+                fill.place(x=0, y=0, relwidth=0.0)
+                self._dt_prob_widgets[s] = fill
+
+        probs = probs or []
+        max_i = int(np.argmax(probs)) if probs else -1
+        for i, s in enumerate(self._dt_prob_signs):
+            p = float(probs[i]) if i < len(probs) else 0.0
+            p = max(0.0, min(1.0, p))
+            fill = self._dt_prob_widgets.get(s)
+            if fill is None:
+                continue
+            fill.configure(bg=C["accent"] if i == max_i and p > 0 else C["accent_dk"])
+            fill.place_configure(relwidth=p)
 
     def _page_header(self, parent, title, subtitle):
         hdr = tk.Frame(parent, bg=C["bg"])
