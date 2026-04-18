@@ -94,6 +94,12 @@ DEFAULT_EPOCHS  = 2000
 LOG_DIR         = "Logs"
 SENTENCE_LINES  = 2
 PROB_BAR_HEIGHT = 6
+CM_HEATMAP_BASE_TONE = 28
+CM_HEATMAP_TONE_RANGE = 185
+CM_HEATMAP_GREEN_SCALE = 0.86
+CM_HEATMAP_BLUE_HEX = "3a"
+CM_LABEL_MAX_LEN = 9
+CM_LABEL_TRUNC_LEN = 8
 
 # -----------------------------------------------------------------
 # COLOUR PALETTE
@@ -1289,6 +1295,7 @@ class App(tk.Tk):
             self._tr_log_wrap, bg=C["surface2"], fg=C["text"], font=FM(8),
             bd=0, relief="flat", height=16, wrap="word",
             insertbackground=C["text"], selectbackground=C["accent_dk"],
+            state="disabled",
             yscrollcommand=lambda *a: self._tr_log_sb.set(*a))
         self._tr_log_sb = tk.Scrollbar(
             self._tr_log_wrap, orient="vertical", command=self._tr_log.yview,
@@ -1356,11 +1363,15 @@ class App(tk.Tk):
             self._train_th.stop()
 
     def _tr_log_clear(self):
+        self._tr_log.config(state="normal")
         self._tr_log.delete("1.0", "end")
+        self._tr_log.config(state="disabled")
 
     def _tr_log_append(self, text):
+        self._tr_log.config(state="normal")
         self._tr_log.insert("end", str(text) + "\n")
         self._tr_log.see("end")
+        self._tr_log.config(state="disabled")
 
     def _copy_train_log(self):
         txt = self._tr_log.get("1.0", "end-1c")
@@ -1664,6 +1675,7 @@ class App(tk.Tk):
             self._ev_log_wrap, bg=C["surface2"], fg=C["text"], font=FM(9),
             bd=0, relief="flat", wrap="word",
             insertbackground=C["text"], selectbackground=C["accent_dk"],
+            state="disabled",
             yscrollcommand=lambda *a: self._ev_log_sb.set(*a))
         self._ev_log_sb = tk.Scrollbar(
             self._ev_log_wrap, orient="vertical", command=self._ev_log.yview,
@@ -1676,7 +1688,8 @@ class App(tk.Tk):
     def _refresh_eval_classes(self):
         classes = detect_classes()
         self._ev_classes_lbl.config(
-            text=f"{len(classes)} classes found" if classes else "No data")
+            text=f"{len(classes)} classes found" if classes
+            else "No data found in MP_Data/ — collect data first")
 
     def _run_eval(self):
         if self.model is None:
@@ -1748,8 +1761,10 @@ class App(tk.Tk):
         self._ev_log_set("\n".join(lines))
 
     def _ev_log_set(self, text):
+        self._ev_log.config(state="normal")
         self._ev_log.delete("1.0", "end")
         self._ev_log.insert("end", text)
+        self._ev_log.config(state="disabled")
 
     def _draw_eval_confusion_matrix(self, cm, classes):
         c = self._ev_cm_canvas
@@ -1769,8 +1784,9 @@ class App(tk.Tk):
         for i in range(n):
             for j in range(n):
                 val = int(cm[i, j])
-                tone = int(28 + (185 * (val / vmax))) if vmax else 28
-                color = f"#{tone:02x}{int(tone * 0.86):02x}3a"
+                # Keep the heatmap in a muted gold palette that matches the dark UI theme.
+                tone = int(CM_HEATMAP_BASE_TONE + (CM_HEATMAP_TONE_RANGE * (val / vmax))) if vmax else CM_HEATMAP_BASE_TONE
+                color = f"#{tone:02x}{int(tone * CM_HEATMAP_GREEN_SCALE):02x}{CM_HEATMAP_BLUE_HEX}"
                 x1 = margin + j * cell
                 y1 = margin + i * cell
                 x2 = x1 + cell
@@ -1785,7 +1801,7 @@ class App(tk.Tk):
                       fill=C["muted"], font=F(8), angle=90)
         if n <= 10:
             for i, name in enumerate(classes):
-                label = name if len(name) <= 9 else f"{name[:8]}…"
+                label = name if len(name) <= CM_LABEL_MAX_LEN else f"{name[:CM_LABEL_TRUNC_LEN]}…"
                 x = margin + (i + 0.5) * cell
                 y = margin + (i + 0.5) * cell
                 c.create_text(x, margin - 8, text=label, fill=C["muted"], font=F(7))
