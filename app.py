@@ -177,10 +177,8 @@ def open_video_capture(src):
             if cap is not None and cap.isOpened():
                 return cap
         for cap in tried:
-            try:
+            if cap is not None:
                 cap.release()
-            except Exception:
-                pass
     return cv2.VideoCapture(src)
 
 
