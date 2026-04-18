@@ -88,6 +88,7 @@ SEQ_LEN         = 30
 SEQS_PER_SIGN   = 30
 FEAT_VEC        = 1662
 DEFAULT_THRESH  = 0.5
+ERROR_MSG_MAX_LEN = 120
 DEFAULT_EPOCHS  = 2000
 LOG_DIR         = "Logs"
 
@@ -1727,17 +1728,21 @@ class App(tk.Tk):
             return False
 
         candidates = []
+        seen = set()
         configured = self.settings.get("model_path", MODEL_PATH)
-        if configured:
+        if configured and configured not in seen:
             candidates.append(configured)
-        if MODEL_PATH not in candidates:
+            seen.add(configured)
+        if MODEL_PATH not in seen:
             candidates.append(MODEL_PATH)
+            seen.add(MODEL_PATH)
         for p in Path(".").glob("*.h5"):
             if p.name.endswith("_weights.h5"):
                 continue
             sp = str(p)
-            if sp not in candidates:
+            if sp not in seen:
                 candidates.append(sp)
+                seen.add(sp)
 
         for path in candidates:
             if Path(path).exists():
@@ -1769,8 +1774,8 @@ class App(tk.Tk):
                     n = m.output_shape[-1]
                     classes = [f"sign_{i}" for i in range(n)]
                 self.after(0, lambda: self._on_loaded(m, classes, path))
-            except Exception:
-                self.after(0, self._on_load_failed)
+            except Exception as e:
+                self.after(0, lambda err=e: self._on_load_failed(err))
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -1784,10 +1789,21 @@ class App(tk.Tk):
             self._pending_detect_start = False
             self.after(0, self._start_detect)
 
-    def _on_load_failed(self):
+    def _on_load_failed(self, err=None):
         self._model_loading = False
+        was_pending_detect = self._pending_detect_start
         self._pending_detect_start = False
-        self._lbl_mstatus.config(text="FAIL Load failed", fg=C["danger"])
+        msg = "FAIL Load failed"
+        if err:
+            detail = str(err).strip()
+            if not detail:
+                detail = "Load failed"
+            if len(detail) > ERROR_MSG_MAX_LEN:
+                detail = f"{detail[:ERROR_MSG_MAX_LEN]}..."
+            msg = f"FAIL {err.__class__.__name__}: {detail}"
+        self._lbl_mstatus.config(text=msg, fg=C["danger"])
+        if was_pending_detect:
+            messagebox.showwarning("No model", "Load or train a model first.")
 
     # ==========================================================
     # MAIN TICK - drains all queues every 40 ms
