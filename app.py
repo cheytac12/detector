@@ -92,6 +92,8 @@ DEFAULT_THRESH  = 0.5
 ERROR_MSG_MAX_LEN = 120
 DEFAULT_EPOCHS  = 2000
 LOG_DIR         = "Logs"
+SENTENCE_LINES  = 2
+PROB_BAR_HEIGHT = 6
 
 # -----------------------------------------------------------------
 # COLOUR PALETTE
@@ -436,7 +438,7 @@ class SentenceBuilder:
     def undo(self):
         if self.sentence:
             self.sentence.pop()
-            self.last_word = self.sentence[-1] if self.sentence else None
+            self.last_word = None
 
     def clear(self):
         self.sentence    = []
@@ -1386,7 +1388,8 @@ class App(tk.Tk):
         sb.pack(fill="x", pady=(4, 8))
         self._dt_sent = tk.Label(sb, text="",
                                  font=F(12), bg=C["surface2"], fg=C["text"],
-                                 wraplength=240, justify="left", anchor="w", height=2)
+                                 wraplength=240, justify="left", anchor="w",
+                                 height=SENTENCE_LINES)
         self._dt_sent.pack(fill="x")
 
         sc = tk.Frame(rp, bg=C["bg"])
@@ -1949,22 +1952,22 @@ class App(tk.Tk):
                 row.pack(fill="x", pady=1)
                 tk.Label(row, text=s, font=F(8), bg=C["bg"],
                          fg=C["text"], width=14, anchor="w").pack(side="left")
-                bg = tk.Frame(row, bg=C["border"], height=6)
+                bg = tk.Frame(row, bg=C["border"], height=PROB_BAR_HEIGHT)
                 bg.pack(side="left", fill="x", expand=True, padx=(4, 0))
                 bg.pack_propagate(False)
-                fill = tk.Frame(bg, bg=C["accent_dk"], height=6)
+                fill = tk.Frame(bg, bg=C["accent_dk"], height=PROB_BAR_HEIGHT)
                 fill.place(x=0, y=0, relwidth=0.0)
                 self._dt_prob_widgets[s] = fill
 
         probs = probs or []
-        max_p = max(probs) if probs else 0
+        max_i = int(np.argmax(probs)) if probs else -1
         for i, s in enumerate(self._dt_prob_signs):
             p = float(probs[i]) if i < len(probs) else 0.0
             p = max(0.0, min(1.0, p))
             fill = self._dt_prob_widgets.get(s)
             if fill is None:
                 continue
-            fill.configure(bg=C["accent"] if p >= max_p and p > 0 else C["accent_dk"])
+            fill.configure(bg=C["accent"] if i == max_i and p > 0 else C["accent_dk"])
             fill.place_configure(relwidth=p)
 
     def _page_header(self, parent, title, subtitle):
