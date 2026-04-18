@@ -3,7 +3,7 @@
 #
 # Key constraints:
 #   • mediapipe 0.10.x requires numpy < 2.0
-#   • mediapipe 0.10.x requires protobuf < 4.0 (NOT 5.x)
+#   • mediapipe 0.10.x requires protobuf >= 4.25.3 and < 5.0
 #   • tensorflow 2.15.x requires Python <= 3.11
 #   • tensorflow 2.16+ supports Python 3.12 but uses keras 3
 #   • We use tensorflow 2.15 + keras 2 for full notebook compatibility
@@ -18,4 +18,4 @@ numpy==1.26.4
 Pillow==10.4.0
 scikit-learn==1.4.2
 scipy==1.13.1
-protobuf>=3.20.0,<4.0.0
+protobuf>=4.25.3,<5.0.0
