@@ -151,11 +151,35 @@ def probe_cameras(max_index: int = 6) -> list:
     """
     found = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i)
+        cap = open_video_capture(i)
         if cap is not None and cap.isOpened():
-            found.append(str(i))
+            ok, _ = cap.read()
+            if ok:
+                found.append(str(i))
             cap.release()
     return found
+
+
+def open_video_capture(src):
+    """
+    Open a camera/video source with platform-aware fallbacks.
+    On Windows camera indices often work better with DirectShow.
+    URL sources keep OpenCV defaults.
+    """
+    if isinstance(src, int) and platform.system() == "Windows":
+        tried = []
+        for name in ("CAP_DSHOW", "CAP_MSMF"):
+            backend = getattr(cv2, name, None)
+            if backend is None:
+                continue
+            cap = cv2.VideoCapture(src, backend)
+            tried.append(cap)
+            if cap is not None and cap.isOpened():
+                return cap
+        for cap in tried:
+            if cap is not None:
+                cap.release()
+    return cv2.VideoCapture(src)
 
 
 # -----------------------------------------------------------------
@@ -421,7 +445,7 @@ class CameraPreviewThread(threading.Thread):
 
     def run(self):
         try:
-            cap = cv2.VideoCapture(self.cam_src)
+            cap = open_video_capture(self.cam_src)
             if not cap.isOpened():
                 self.error = f"Cannot open camera: {self.cam_src!r}"
                 return
@@ -468,7 +492,7 @@ class CollectThread(threading.Thread):
             total_seqs = len(self.signs) * self.n_seqs
             done_seqs  = 0
 
-            cap = cv2.VideoCapture(self.cam_src)
+            cap = open_video_capture(self.cam_src)
             if not cap.isOpened():
                 self.status_q.put(dict(error=f"Cannot open camera: {self.cam_src!r}"))
                 return
@@ -667,7 +691,7 @@ class DetectThread(threading.Thread):
 
     def run(self):
         builder = SentenceBuilder(self.threshold)
-        cap = cv2.VideoCapture(self.src)
+        cap = open_video_capture(self.src)
 
         if not cap.isOpened():
             self.out_q.put({"done": True, "error": f"Cannot open source: {self.src!r}"})
@@ -831,8 +855,10 @@ class CameraSelector(tk.Frame):
         detected = probe_cameras()
         opts = detected + ["http://192.168.x.x:4747/video (DroidCam)"]
         self._combo["values"] = opts
+        current = self._var.get().strip()
         if detected:
-            self._var.set(detected[0])
+            if not current:
+                self._var.set(detected[0])
             self._status.config(text=f"({len(detected)} cam(s) found)")
         else:
             self._status.config(text="(no cams detected - enter manually)")
