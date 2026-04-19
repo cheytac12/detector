@@ -102,24 +102,24 @@ CM_HEATMAP_BLUE_HEX = "3a"
 CM_LABEL_MAX_LEN = 9
 CM_LABEL_TRUNC_LEN = 8
 
-engine = None
+tts_engine = None
 try:
-    engine = pyttsx3.init()
-    engine.setProperty("rate", 150)
+    tts_engine = pyttsx3.init()
+    tts_engine.setProperty("rate", 150)
 except Exception as e:
     print(f"[WARN] TTS initialization failed: {e}")
-    engine = None
+    tts_engine = None
 
 _tts_lock = threading.Lock()
 
 
 def speak_word_thread(word):
-    if not word or engine is None:
+    if not word or tts_engine is None:
         return
     try:
         with _tts_lock:
-            engine.say(word)
-            engine.runAndWait()
+            tts_engine.say(word)
+            tts_engine.runAndWait()
     except Exception as e:
         print(f"[WARN] TTS playback failed: {e}")
 
