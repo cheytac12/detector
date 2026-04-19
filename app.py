@@ -33,6 +33,7 @@ import json
 import platform
 from collections import deque
 from pathlib import Path
+import pyttsx3
 
 # suppress TF noise before import
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -100,6 +101,27 @@ CM_HEATMAP_GREEN_SCALE = 0.86
 CM_HEATMAP_BLUE_HEX = "3a"
 CM_LABEL_MAX_LEN = 9
 CM_LABEL_TRUNC_LEN = 8
+
+engine = None
+try:
+    engine = pyttsx3.init()
+    engine.setProperty("rate", 150)
+except Exception as e:
+    print(f"[WARN] TTS initialization failed: {e}")
+    engine = None
+
+_tts_lock = threading.Lock()
+
+
+def speak_word_thread(word):
+    if not word or engine is None:
+        return
+    try:
+        with _tts_lock:
+            engine.say(word)
+            engine.runAndWait()
+    except Exception as e:
+        print(f"[WARN] TTS playback failed: {e}")
 
 # -----------------------------------------------------------------
 # COLOUR PALETTE
@@ -748,7 +770,13 @@ class DetectThread(threading.Thread):
                     confidence = float(res[idx])
                     pred_word  = self.signs[idx] if confidence >= self.threshold else ""
 
-                    builder.update(res, self.signs)
+                    word_added = builder.update(res, self.signs)
+                    if word_added and builder.last_word:
+                        threading.Thread(
+                            target=speak_word_thread,
+                            args=(builder.last_word,),
+                            daemon=True,
+                        ).start()
 
                     if self.show_prob_viz:
                         image = prob_viz(res, self.signs, image, self.colors)
